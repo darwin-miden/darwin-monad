@@ -12,6 +12,8 @@ export type Asset = {
   priceUsd: number;
   /** Liquidity available on the USDC route. */
   depthUsd: number;
+  /** Last oracle update (unix seconds). */
+  updatedAt?: number;
 };
 
 /** One constituent of a basket: a fixed number of units per basket share. */
@@ -32,7 +34,10 @@ export type Basket = {
   address: string;
   symbol: string;
   name: string;
+  description?: string;
   owner: string;
+  /** Deployment time (unix seconds). */
+  createdAt?: number;
   supplyFloat: number;
   paused: boolean;
   mintFeeBps: number;
@@ -46,8 +51,9 @@ export type Basket = {
   /** Price of one share through the router, fees and impact included. */
   costPerShareUsd: number;
   quote: Quote;
-  issuanceAvailable: number;
-  redemptionAvailable: number;
+  /** Shares that can still be minted / redeemed this hour, when the vault throttles flows. */
+  issuanceAvailable?: number;
+  redemptionAvailable?: number;
   legs: Leg[];
 };
 

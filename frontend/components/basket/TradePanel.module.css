@@ -457,3 +457,9 @@
     font-size: 10.5px;
   }
 }
+
+.faucetRow {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}

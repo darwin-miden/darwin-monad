@@ -1,0 +1,83 @@
+{
+  "chainId": 10143,
+  "startBlock": 63840821,
+  "usd": "0x2a1b795E524E155BFAb28699D94C496EE93b0b3f",
+  "oracle": "0xC568B498B6FdE53b0DEED570CBC28C0f940cfC5a",
+  "market": "0x9c0E19a740559C5a974351C99862793F9961640d",
+  "factory": "0x041A8dE9B3FBa4F8bf4fb7901d74703D5bA4818E",
+  "router": "0xe90a46af27E4b3Ebbb748EceaB33346F33Ea23bB",
+  "lens": "0x785b2Cb17510Ce95e21bE31E4F3f996Fb7985d4a",
+  "featured": "0xA14dBbbE353E630fa30D9f06Da1e45a29dbC1A71",
+  "stocks": [
+    {
+      "symbol": "AAPL",
+      "name": "Apple",
+      "address": "0x21Fd949D905e576bAF5bc2f0D912b3e4d0989D0B"
+    },
+    {
+      "symbol": "MSFT",
+      "name": "Microsoft",
+      "address": "0xd51B554259c1aA858CB3B145E6b73Dd195DE59a1"
+    },
+    {
+      "symbol": "NVDA",
+      "name": "NVIDIA",
+      "address": "0x72733B57EF063faed48348b0c8F8850638B72B8A"
+    },
+    {
+      "symbol": "GOOGL",
+      "name": "Alphabet Class A",
+      "address": "0xB54e1e874D91bc5D4D4736A2502A9364CFa0b872"
+    },
+    {
+      "symbol": "AMZN",
+      "name": "Amazon",
+      "address": "0x3965E319a939d057cc2AEA60B1AA469267672b43"
+    },
+    {
+      "symbol": "META",
+      "name": "Meta Platforms",
+      "address": "0x65a2349f3D363608a4d3472c3D0a033005fD42Ae"
+    },
+    {
+      "symbol": "TSLA",
+      "name": "Tesla",
+      "address": "0x68018d90fc7c26fEE4F04De46BeCFcCba1Fe2D1F"
+    },
+    {
+      "symbol": "AVGO",
+      "name": "Broadcom",
+      "address": "0x5FF730eAB4ae0F3C6E14466140F37daF91cFeD33"
+    },
+    {
+      "symbol": "AMD",
+      "name": "AMD",
+      "address": "0x4be29df73b88c6D62d6d422aB016908A46f0f818"
+    },
+    {
+      "symbol": "NFLX",
+      "name": "Netflix",
+      "address": "0xDDE9A88E7fEAB4dCEB0A5eB97E4c8E286B44aC49"
+    },
+    {
+      "symbol": "PLTR",
+      "name": "Palantir Technologies",
+      "address": "0x344C8022C1c3822A4899EB21f83cfC68700B4535"
+    },
+    {
+      "symbol": "COIN",
+      "name": "Coinbase",
+      "address": "0x3d98BcD2Daf1F23481aa11eBb28c2dd35d9C71c8"
+    },
+    {
+      "symbol": "MSTR",
+      "name": "Strategy Inc.",
+      "address": "0x3671B3B4EC4a4Aa7628D515b19e233508321eCFA"
+    },
+    {
+      "symbol": "HOOD",
+      "name": "Robinhood Markets",
+      "address": "0x70378098d5FB1016b3f40D1d872140e739E86c2C"
+    }
+  ]
+}

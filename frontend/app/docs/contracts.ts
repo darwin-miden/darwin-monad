@@ -1,3 +1,4 @@
+import { DEPLOYMENT } from "@/lib/contracts";
 import basketFactory from "./abis/basket-factory.json";
 import basketLens from "./abis/basket-lens.json";
 import basketRouter from "./abis/basket-router.json";
@@ -16,18 +17,15 @@ export const NETWORK = {
   multicall3: "0xcA11bde05977b3631167028862bE2a173976CA11",
 } as const;
 
-/**
- * Deployed addresses. Unset until the contracts are deployed; fill them from
- * contracts/deployments/10143.json through the NEXT_PUBLIC_DARWIN_* variables.
- */
+/** Deployed addresses (contracts/deployments/10143.json). */
 export const ADDRESSES = {
-  factory: process.env.NEXT_PUBLIC_DARWIN_FACTORY,
-  router: process.env.NEXT_PUBLIC_DARWIN_ROUTER,
-  lens: process.env.NEXT_PUBLIC_DARWIN_LENS,
-  market: process.env.NEXT_PUBLIC_DARWIN_MARKET,
-  oracle: process.env.NEXT_PUBLIC_DARWIN_ORACLE,
-  usdc: process.env.NEXT_PUBLIC_DARWIN_USDC,
-  startBlock: process.env.NEXT_PUBLIC_DARWIN_START_BLOCK,
+  factory: DEPLOYMENT.factory,
+  router: DEPLOYMENT.router,
+  lens: DEPLOYMENT.lens,
+  market: DEPLOYMENT.market,
+  oracle: DEPLOYMENT.oracle,
+  usdc: DEPLOYMENT.usd,
+  startBlock: String(DEPLOYMENT.startBlock),
 } as const;
 
 export const addressUrl = (address: string) => `${NETWORK.explorer}/address/${address}`;

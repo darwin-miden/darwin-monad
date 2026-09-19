@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Change, Chart } from "@/components/chart/Chart";
 import { CompositionTreemap } from "@/components/treemap/CompositionTreemap";
 import { Segmented } from "@/components/ui/Segmented";
@@ -91,16 +91,19 @@ export function BasketView({ address, mode }: { address: string; mode?: string }
     [basket?.legs],
   );
 
-  // Baskets created in this browser load from storage after mount; don't call them missing before that.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mount flag
-    setMounted(true);
-  }, []);
-
+  // `undefined` while the on-chain list loads, `null` once loaded without this address.
+  if (basket === undefined) {
+    return (
+      <Page>
+        <LoadingBasket />
+      </Page>
+    );
+  }
   if (!basket) {
     return (
-      <Page>{mounted ? <p className="t-body c-negative">No basket found at {short(address)}.</p> : <LoadingBasket />}</Page>
+      <Page>
+        <p className="t-body c-negative">No basket found at {short(address)}.</p>
+      </Page>
     );
   }
 

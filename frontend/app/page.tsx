@@ -12,7 +12,7 @@ import styles from "@/components/discovery/Discovery.module.css";
 
 export default function Home() {
   const { data: baskets, error } = useBaskets();
-  const byCapacity = useMemo(() => (baskets ? [...baskets].sort((a, b) => b.capacityUsd - a.capacityUsd) : null), [baskets]);
+  const byCapacity = useMemo(() => (baskets ? [...baskets].sort((a, b) => b.tvlUsd - a.tvlUsd) : null), [baskets]);
   const featured = baskets?.find((b) => b.address.toLowerCase() === FEATURED_BASKET) ?? byCapacity?.[0];
   const explore =
     (byCapacity && (byCapacity.length > 3 ? byCapacity.filter((b) => b.address !== featured?.address).slice(0, 3) : byCapacity)) ?? [];

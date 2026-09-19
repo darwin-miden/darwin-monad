@@ -9,7 +9,7 @@ import { assetSurface } from "@/lib/assetColor";
 import { useAssets, useBaskets } from "@/lib/data/store";
 import type { Asset, Basket, Leg, Range } from "@/lib/data/types";
 import { calendarDayYear, intradayStamp, short, usd } from "@/lib/format";
-import { RANGES, syntheticNavHistory } from "@/lib/navHistory";
+import { RANGES, useNavHistory } from "@/lib/navHistory";
 import { chain } from "@/lib/wallet";
 import styles from "./stock.module.css";
 
@@ -212,14 +212,16 @@ function RelatedRow({ basket }: { basket: Basket }) {
 export function StockView({ symbol }: { symbol: string }) {
   const { data: assets } = useAssets();
   const { data: baskets } = useBaskets();
-  const asset = assets.assets.find((a) => a.symbol.toUpperCase() === symbol);
+  const asset = assets?.assets.find((a) => a.symbol.toUpperCase() === symbol);
   const [range, setRange] = useState<Range>("30D");
 
-  const history = useMemo(() => (asset ? syntheticNavHistory([pseudoLeg(asset)], range) : null), [asset, range]);
+  const legs = useMemo(() => (asset ? [pseudoLeg(asset)] : undefined), [asset]);
+  const nav = useNavHistory(legs, range);
+  const history = asset ? nav : null;
 
   const holders = useMemo(
     () =>
-      baskets
+      (baskets ?? [])
         .flatMap((basket) => {
           const leg = basket.legs.find((l) => l.symbol === symbol);
           return leg ? [{ basket, backing: basket.tvlUsd * leg.weight }] : [];
@@ -235,6 +237,19 @@ export function StockView({ symbol }: { symbol: string }) {
       <span>{symbol}</span>
     </nav>
   );
+
+  if (!assets) {
+    return (
+      <main className="page">
+        <div className="wrap">
+          {breadcrumb}
+          <section className={`card empty ${styles.missing}`}>
+            <p>Loading {symbol} from Monad…</p>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   if (!asset || !history) {
     return (
@@ -255,7 +270,7 @@ export function StockView({ symbol }: { symbol: string }) {
     );
   }
 
-  const closes = history.points.map(([, v]) => v);
+  const closes = history.points.length ? history.points.map(([, v]) => v) : [asset.priceUsd];
   const low = Math.min(...closes);
   const high = Math.max(...closes);
   const backing = holders.reduce((s, h) => s + h.backing, 0);

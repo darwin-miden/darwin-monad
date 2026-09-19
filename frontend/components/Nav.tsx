@@ -4,8 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef, useState } from "react";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DEPLOYMENT, testUsdAbi } from "@/lib/contracts";
+import { useDarwin } from "@/lib/data/store";
 import { short } from "@/lib/format";
-import { useWallet } from "@/lib/wallet";
+import { useSendTx } from "@/lib/tx";
+import { chain, useWallet } from "@/lib/wallet";
 
 const LINKS = [
   ["/baskets", "Baskets"],
@@ -15,6 +18,8 @@ const LINKS = [
 ] as const;
 
 const WALLET_OPTIONS = [
+  { value: "faucet", label: "Get 10,000 test USDC" },
+  { value: "explorer", label: "View on explorer" },
   { value: "change", label: "Change" },
   { value: "disconnect", label: "Disconnect" },
 ];
@@ -24,11 +29,19 @@ export function Nav() {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wallet = useWallet();
+  const sendTx = useSendTx();
+  const { refresh } = useDarwin();
   const onCreate = pathname === "/create";
 
   const onWalletOption = (value: string) => {
     setOpen(false);
-    if (value === "change") wallet.change();
+    if (value === "faucet") {
+      sendTx({ address: DEPLOYMENT.usd, abi: testUsdAbi, functionName: "faucet" })
+        .then(() => refresh())
+        .catch(() => {});
+    } else if (value === "explorer" && wallet.address) {
+      window.open(`${chain.blockExplorers.default.url}/address/${wallet.address}`, "_blank", "noopener");
+    } else if (value === "change") wallet.change();
     else wallet.disconnect();
   };
 
@@ -69,7 +82,7 @@ export function Nav() {
         }}
         disabled={wallet.connecting}
       >
-        Connect wallet
+        {wallet.hasWallet ? "Connect wallet" : "Install a wallet"}
       </button>
     );
 

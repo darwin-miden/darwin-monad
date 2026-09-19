@@ -1,16 +1,41 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useConnection } from "wagmi";
-import snapshot from "./snapshot.json";
-import type { Asset, Basket, Leg, Position, Quote } from "./types";
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useConnection, usePublicClient } from "wagmi";
+import type { Address, ContractFunctionReturnType } from "viem";
+import {
+  DEPLOYMENT,
+  PROTOCOL_MINT_FEE_BPS,
+  PROTOCOL_REDEEM_FEE_BPS,
+  WAD,
+  erc20Abi,
+  fromUsdc,
+  fromWad,
+  lensAbi,
+  routerAbi,
+} from "@/lib/contracts";
+import type { Asset, Basket, Leg, Position } from "./types";
 
-const STORAGE_KEY = "darwin-demo-v1";
+type BasketView = ContractFunctionReturnType<typeof lensAbi, "view", "getBasket">;
 
-export const FEATURED_BASKET = snapshot.featured.toLowerCase();
-export const MON_USD = snapshot.monUsd;
-export const ASSETS = snapshot.assets as Asset[];
-const SEED_BASKETS = snapshot.baskets as Basket[];
+export const FEATURED_BASKET = DEPLOYMENT.featured.toLowerCase();
+/** No MON-quoted baskets on this deployment: every basket trades against USDC. */
+export const MON_USD = 0;
+
+/** Listed stocks with their display names. Live prices come from `useAssets`. */
+export const ASSETS: Asset[] = DEPLOYMENT.stocks.map((s) => ({
+  symbol: s.symbol,
+  name: s.name,
+  address: s.address,
+  decimals: 18,
+  class: "stock",
+  priceUsd: 0,
+  depthUsd: 0,
+}));
+
+const REFRESH_MS = 10_000;
+const MAX_BASKETS = 500n;
 
 /** Liquidity-limited trade size at a given price impact (default 1%). */
 export function capacityUsd(legs: Pick<Leg, "weight" | "depthUsd">[], impact = 0.01) {
@@ -18,159 +43,97 @@ export function capacityUsd(legs: Pick<Leg, "weight" | "depthUsd">[], impact = 0
   return cost > 0 && Number.isFinite(cost) ? impact / cost : 0;
 }
 
-export type NewBasket = {
-  name: string;
-  symbol: string;
-  quote: Quote;
-  navUsd: number;
-  owner: string;
-  /** Starting share of NAV per asset, summing to 1. */
-  allocations: { symbol: string; weight: number }[];
-};
-
-type Persisted = {
-  created: Basket[];
-  /** wallet (lowercase) -> basket (lowercase) -> shares */
-  balances: Record<string, Record<string, number>>;
-};
-
-type Store = {
-  baskets: Basket[];
-  assets: Asset[];
-  balanceOf: (wallet: string | undefined, basket: string) => number;
-  positionsOf: (wallet: string | undefined) => Position[];
-  /** Mint (positive) or burn (negative) shares for a wallet. */
-  transact: (wallet: string, basket: string, sharesDelta: number) => void;
-  createBasket: (input: NewBasket) => Basket;
-};
-
-const DarwinContext = createContext<Store | null>(null);
-
-const randomAddress = () =>
-  `0x${Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
-
-function buildBasket(input: NewBasket): Basket {
-  const legs: Leg[] = input.allocations.map((a) => {
-    const asset = ASSETS.find((x) => x.symbol === a.symbol);
-    if (!asset) throw new Error(`Unknown asset ${a.symbol}`);
-    const valueUsd = input.navUsd * a.weight;
-    return {
-      address: asset.address,
-      symbol: asset.symbol,
-      decimals: asset.decimals,
-      class: asset.class,
-      perShare: valueUsd / asset.priceUsd,
-      priceUsd: asset.priceUsd,
-      valueUsd,
-      weight: a.weight,
-      depthUsd: asset.depthUsd,
-    };
-  });
+/**
+ * Routed trades clear against the StockMarket at the oracle price (fixed spread, no size impact),
+ * so the binding limit on any basket trade is the market's USDC reserve.
+ */
+function toBasket(v: BasketView, costPerShare: bigint | undefined, reserveUsd: number): Basket {
+  const legs: Leg[] = v.legs.map((l) => ({
+    address: l.token,
+    symbol: l.symbol,
+    decimals: 18,
+    class: "stock",
+    perShare: fromWad(l.units),
+    priceUsd: fromWad(l.price),
+    valueUsd: fromWad(l.value),
+    weight: Number(l.weightBps) / 1e4,
+    depthUsd: reserveUsd,
+  }));
   return {
-    address: randomAddress(),
-    symbol: input.symbol,
-    name: input.name,
-    owner: input.owner,
-    supplyFloat: 0,
+    address: v.vault,
+    symbol: v.symbol,
+    name: v.name,
+    description: v.description,
+    owner: v.owner,
+    createdAt: Number(v.createdAt),
+    supplyFloat: fromWad(v.totalSupply),
     paused: false,
-    mintFeeBps: 0,
-    redeemFeeBps: 0,
-    protocolMintFeeBps: 10,
-    protocolRedeemFeeBps: 10,
-    navUsd: input.navUsd,
-    tvlUsd: 0,
-    capacityUsd: capacityUsd(legs),
-    costPerShareUsd: input.navUsd * 1.004,
-    quote: input.quote,
-    issuanceAvailable: 1e12,
-    redemptionAvailable: 1e12,
+    mintFeeBps: v.mintFeeBps,
+    redeemFeeBps: v.redeemFeeBps,
+    protocolMintFeeBps: PROTOCOL_MINT_FEE_BPS,
+    protocolRedeemFeeBps: PROTOCOL_REDEEM_FEE_BPS,
+    navUsd: fromWad(v.nav),
+    tvlUsd: fromWad(v.tvl),
+    capacityUsd: reserveUsd,
+    costPerShareUsd: fromUsdc(costPerShare),
+    quote: "USDC",
     legs,
   };
 }
 
+function useMarketReserve() {
+  const client = usePublicClient();
+  return useQuery({
+    queryKey: ["darwin", "reserve"],
+    enabled: !!client,
+    refetchInterval: REFRESH_MS,
+    queryFn: async () =>
+      fromUsdc(
+        await client!.readContract({ address: DEPLOYMENT.usd, abi: erc20Abi, functionName: "balanceOf", args: [DEPLOYMENT.market] }),
+      ),
+  });
+}
+
+function useBasketsQuery() {
+  const client = usePublicClient();
+  const { data: reserve } = useMarketReserve();
+  return useQuery({
+    queryKey: ["darwin", "baskets", reserve],
+    enabled: !!client && reserve !== undefined,
+    refetchInterval: REFRESH_MS,
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const views = await client!.readContract({
+        address: DEPLOYMENT.lens,
+        abi: lensAbi,
+        functionName: "getBaskets",
+        args: [0n, MAX_BASKETS],
+      });
+      const costs = await client!.multicall({
+        allowFailure: true,
+        contracts: views.map((v) => ({
+          address: DEPLOYMENT.router,
+          abi: routerAbi,
+          functionName: "quoteBuyExact" as const,
+          args: [v.vault, WAD] as const,
+        })),
+      });
+      return views.map((v, i) => toBasket(v, costs[i].status === "success" ? (costs[i].result as bigint) : undefined, reserve!));
+    },
+  });
+}
+
+type Store = {
+  /** Refetches every on-chain read after a transaction. */
+  refresh: () => Promise<void>;
+};
+
+const DarwinContext = createContext<Store | null>(null);
+
 export function DarwinProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<Persisted>({ created: [], balances: {} });
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate from storage after mount
-      if (raw) setState(JSON.parse(raw) as Persisted);
-    } catch {
-      // Corrupt or unavailable storage: start fresh.
-    }
-  }, []);
-
-  const persist = useCallback((update: (prev: Persisted) => Persisted) => {
-    setState((prev) => {
-      const next = update(prev);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // Storage full or blocked: keep in memory only.
-      }
-      return next;
-    });
-  }, []);
-
-  const baskets = useMemo(() => {
-    const supply = new Map<string, number>();
-    for (const wallet of Object.values(state.balances)) {
-      for (const [basket, shares] of Object.entries(wallet)) supply.set(basket, (supply.get(basket) ?? 0) + shares);
-    }
-    return [...SEED_BASKETS, ...state.created].map((b) => {
-      const extra = supply.get(b.address.toLowerCase()) ?? 0;
-      if (!extra) return b;
-      const supplyFloat = b.supplyFloat + extra;
-      return { ...b, supplyFloat, tvlUsd: supplyFloat * b.navUsd };
-    });
-  }, [state]);
-
-  const balanceOf = useCallback(
-    (wallet: string | undefined, basket: string) => (wallet ? (state.balances[wallet.toLowerCase()]?.[basket.toLowerCase()] ?? 0) : 0),
-    [state.balances],
-  );
-
-  const positionsOf = useCallback(
-    (wallet: string | undefined) => {
-      if (!wallet) return [];
-      const held = state.balances[wallet.toLowerCase()] ?? {};
-      return baskets
-        .filter((b) => (held[b.address.toLowerCase()] ?? 0) > 0)
-        .map((b) => {
-          const balanceFloat = held[b.address.toLowerCase()];
-          return { ...b, balanceFloat, valueUsd: balanceFloat * b.navUsd };
-        });
-    },
-    [baskets, state.balances],
-  );
-
-  const transact = useCallback(
-    (wallet: string, basket: string, sharesDelta: number) =>
-      persist((prev) => {
-        const w = wallet.toLowerCase();
-        const k = basket.toLowerCase();
-        const current = prev.balances[w]?.[k] ?? 0;
-        const nextBalance = Math.max(0, current + sharesDelta);
-        return { ...prev, balances: { ...prev.balances, [w]: { ...prev.balances[w], [k]: nextBalance } } };
-      }),
-    [persist],
-  );
-
-  const createBasket = useCallback(
-    (input: NewBasket) => {
-      const basket = buildBasket(input);
-      persist((prev) => ({ ...prev, created: [...prev.created, basket] }));
-      return basket;
-    },
-    [persist],
-  );
-
-  const value = useMemo(
-    () => ({ baskets, assets: ASSETS, balanceOf, positionsOf, transact, createBasket }),
-    [baskets, balanceOf, positionsOf, transact, createBasket],
-  );
-
+  const queryClient = useQueryClient();
+  const refresh = useCallback(() => queryClient.invalidateQueries(), [queryClient]);
+  const value = useMemo(() => ({ refresh }), [refresh]);
   return <DarwinContext.Provider value={value}>{children}</DarwinContext.Provider>;
 }
 
@@ -180,28 +143,70 @@ export function useDarwin() {
   return store;
 }
 
+const LOAD_ERROR = "Couldn't reach Monad Testnet. Retrying…";
+
 export function useBaskets() {
-  const { baskets } = useDarwin();
-  return { data: baskets, error: null as string | null };
+  const { data, error } = useBasketsQuery();
+  return { data, error: error && !data ? LOAD_ERROR : null };
 }
 
 export function useBasket(address: string | undefined) {
-  const { baskets } = useDarwin();
+  const { data: baskets, error } = useBaskets();
   const data = useMemo(
-    () => (address ? (baskets.find((b) => b.address.toLowerCase() === address.toLowerCase()) ?? null) : null),
+    () => (address && baskets ? (baskets.find((b) => b.address.toLowerCase() === address.toLowerCase()) ?? null) : undefined),
     [address, baskets],
   );
-  return { data, error: null as string | null };
+  return { data, error };
 }
 
 export function useAssets() {
-  return { data: { assets: ASSETS, monUsd: MON_USD }, error: null as string | null };
+  const client = usePublicClient();
+  const { data: reserve } = useMarketReserve();
+  const { data, error } = useQuery({
+    queryKey: ["darwin", "assets", reserve],
+    enabled: !!client && reserve !== undefined,
+    refetchInterval: REFRESH_MS,
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const assets = await client!.readContract({ address: DEPLOYMENT.lens, abi: lensAbi, functionName: "getAssets" });
+      return assets.map(
+        (a): Asset => ({
+          symbol: a.symbol,
+          name: ASSETS.find((s) => s.address.toLowerCase() === a.token.toLowerCase())?.name ?? a.name,
+          address: a.token,
+          decimals: a.decimals,
+          class: "stock",
+          priceUsd: fromWad(a.price),
+          depthUsd: reserve!,
+          updatedAt: Number(a.updatedAt),
+        }),
+      );
+    },
+  });
+  return { data: data ? { assets: data, monUsd: MON_USD } : undefined, error: error && !data ? LOAD_ERROR : null };
 }
 
 export function useHoldings(wallet: string | undefined) {
-  const { positionsOf } = useDarwin();
-  const data = useMemo(() => positionsOf(wallet), [positionsOf, wallet]);
-  return { data, error: null as string | null };
+  const client = usePublicClient();
+  const { data: baskets } = useBaskets();
+  const { data: holdings, error } = useQuery({
+    queryKey: ["darwin", "holdings", wallet?.toLowerCase()],
+    enabled: !!client && !!wallet,
+    refetchInterval: REFRESH_MS,
+    queryFn: () =>
+      client!.readContract({ address: DEPLOYMENT.lens, abi: lensAbi, functionName: "getHoldings", args: [wallet as Address] }),
+  });
+  const data = useMemo(() => {
+    if (!wallet) return [];
+    if (!holdings || !baskets) return undefined;
+    return holdings.flatMap((h): Position[] => {
+      const basket = baskets.find((b) => b.address.toLowerCase() === h.vault.toLowerCase());
+      if (!basket) return [];
+      const balanceFloat = fromWad(h.balance);
+      return [{ ...basket, balanceFloat, valueUsd: balanceFloat * basket.navUsd }];
+    });
+  }, [wallet, holdings, baskets]);
+  return { data, error: error && !data ? LOAD_ERROR : null };
 }
 
 /** Connected wallet's positions. */

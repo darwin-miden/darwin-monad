@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { parseEventLogs } from "viem";
 import { useConnection } from "wagmi";
 import { CompositionTreemap } from "@/components/treemap/CompositionTreemap";
 import { SearchableMultiSelectDropdown } from "@/components/ui/Dropdown";
@@ -12,13 +13,16 @@ import { capacityUsd, useAssets, useDarwin } from "@/lib/data/store";
 import type { Asset, Quote } from "@/lib/data/types";
 import { pct, qty, short, usd } from "@/lib/format";
 import { chain, useWallet } from "@/lib/wallet";
+import { DEPLOYMENT, factoryAbi, PROTOCOL_MINT_FEE_BPS, PROTOCOL_REDEEM_FEE_BPS, toWad } from "@/lib/contracts";
+import { errorMessage, useSendTx } from "@/lib/tx";
 import { Status } from "@/components/ui/Status";
 import styles from "./create.module.css";
 
 const MAX_ASSETS = 16;
-const QUOTES: readonly Quote[] = ["USDC", "MON"];
-/** Router mint/redeem fee applied to new baskets (10 bps each way). */
-const PROTOCOL_FEE = 0.001;
+const QUOTES: readonly Quote[] = ["USDC"];
+/** Fixed protocol fees charged by every BasketVault (creator fees start at zero). */
+const MINT_FEE = PROTOCOL_MINT_FEE_BPS / 1e4;
+const REDEEM_FEE = PROTOCOL_REDEEM_FEE_BPS / 1e4;
 
 const DECIMAL_INPUT = /^\d*(?:\.\d*)?$/;
 
@@ -58,18 +62,18 @@ function redistribute(ids: string[], shares: Record<string, number>, total: numb
   return out;
 }
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export function CreateBasket({ initialAsset }: { initialAsset?: string }) {
   const router = useRouter();
   const wallet = useWallet();
   const { chainId } = useConnection();
-  const { createBasket } = useDarwin();
+  const { refresh } = useDarwin();
+  const sendTx = useSendTx();
   const { data } = useAssets();
+  const assets = useMemo(() => data?.assets ?? [], [data]);
 
   const [quote, setQuote] = useState<Quote>("USDC");
   // `/create?asset=NVDA` (linked from stock pages) starts with that stock picked.
-  const preset = data.assets.find((a) => a.symbol === initialAsset?.toUpperCase())?.address;
+  const preset = assets.find((a) => a.symbol === initialAsset?.toUpperCase())?.address;
   const [selected, setSelected] = useState<string[]>(preset ? [preset] : []);
   const [focused, setFocused] = useState<string | null>(preset ?? null);
   const [shares, setShares] = useState<Record<string, number>>(preset ? { [preset]: 100 } : {});
@@ -83,7 +87,17 @@ export function CreateBasket({ initialAsset }: { initialAsset?: string }) {
   const connected = wallet.isConnected && Boolean(wallet.address);
   const wrongNetwork = connected && chainId !== undefined && chainId !== chain.id;
 
-  const reachable = useMemo(() => [...data.assets].sort((a, b) => b.depthUsd - a.depthUsd), [data.assets]);
+  // Assets load from the chain after mount: apply the `?asset=` preset once they arrive.
+  useEffect(() => {
+    if (!preset || selected.length > 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time preset once on-chain assets load
+    setSelected([preset]);
+    setFocused(preset);
+    setShares({ [preset]: 100 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset]);
+
+  const reachable = useMemo(() => [...assets].sort((a, b) => a.symbol.localeCompare(b.symbol)), [assets]);
   const picked = useMemo(
     () => selected.map((address) => reachable.find((a) => a.address === address)).filter((a): a is Asset => Boolean(a)),
     [selected, reachable],
@@ -141,26 +155,25 @@ export function CreateBasket({ initialAsset }: { initialAsset?: string }) {
 
   async function deploy() {
     if (!connected || !wallet.address) return setStatus("Connect a wallet first.");
-    if (wrongNetwork) return setStatus(`Switch to ${chain.name}.`);
     if (!ready) return setStatus("Select at least two priced assets and name the basket.");
     setWorking(true);
     try {
-      setStatus("Checking deployment…");
-      await wait(450);
-      setStatus("Confirm deployment…");
-      await wait(650);
-      const basket = createBasket({
-        name: name.trim(),
-        symbol: ticker.trim(),
-        quote,
-        navUsd: nav,
-        owner: wallet.address,
-        allocations: legs.map((l) => ({ symbol: l.asset.symbol, weight: l.weight })),
+      setStatus("Confirm deployment in your wallet…");
+      // Units per share are locked here: weight x NAV / price, never rebalanced afterwards.
+      const units = legs.map((l) => toWad(l.qtyPerShare));
+      const { receipt } = await sendTx({
+        address: DEPLOYMENT.factory,
+        abi: factoryAbi,
+        functionName: "deploy",
+        args: [name.trim(), ticker.trim(), "", legs.map((l) => l.asset.address as `0x${string}`), units, 0, 0],
       });
-      setStatus("Basket created.");
-      router.push(`/basket/${basket.address}`);
+      const [event] = parseEventLogs({ abi: factoryAbi, logs: receipt.logs, eventName: "BasketDeployed" });
+      if (!event) throw new Error("Deployment event not found.");
+      setStatus("Basket deployed.");
+      await refresh();
+      router.push(`/basket/${event.args.vault}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setStatus(errorMessage(error));
     } finally {
       setWorking(false);
     }
@@ -188,7 +201,7 @@ export function CreateBasket({ initialAsset }: { initialAsset?: string }) {
           : !connected
             ? "Connect wallet"
             : wrongNetwork
-              ? "Wrong network"
+              ? `Switch to ${chain.name} & confirm`
               : "Confirm basket";
 
   return (
@@ -392,7 +405,7 @@ export function CreateBasket({ initialAsset }: { initialAsset?: string }) {
                     <button
                       type="button"
                       className="btn btn-ink"
-                      disabled={working || !ready || wrongNetwork || wallet.connecting}
+                      disabled={working || !ready || wallet.connecting}
                       onClick={() => (connected ? void deploy() : wallet.connect())}
                     >
                       {confirmLabel}
@@ -418,7 +431,7 @@ export function CreateBasket({ initialAsset }: { initialAsset?: string }) {
                 <div className={styles.fact}>
                   <span>Mint / redeem fee</span>
                   <b>
-                    {pct(PROTOCOL_FEE)} / {pct(PROTOCOL_FEE)}
+                    {pct(MINT_FEE)} / {pct(REDEEM_FEE)}
                   </b>
                 </div>
                 <div className={styles.fact}>

@@ -1,13 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { maxUint256 } from "viem";
+import { usePublicClient, useReadContract, useReadContracts } from "wagmi";
 import { Segmented } from "@/components/ui/Segmented";
 import { StockLogo } from "@/components/ui/StockLogo";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { FaucetButton } from "@/components/wallet/FaucetButton";
 import { assetColor } from "@/lib/assetColor";
-import { useDarwin, MON_USD } from "@/lib/data/store";
+import {
+  DEPLOYMENT,
+  deadline,
+  erc20Abi,
+  fromUsdc,
+  fromWad,
+  parseAmount,
+  routerAbi,
+  USDC_DECIMALS,
+  vaultAbi,
+  withSlippage,
+} from "@/lib/contracts";
+import { useDarwin } from "@/lib/data/store";
 import type { Basket } from "@/lib/data/types";
 import { compactNumber, pct, qty, short, usd } from "@/lib/format";
+import { errorMessage, txUrl, useSendTx } from "@/lib/tx";
 import { chain, useWallet } from "@/lib/wallet";
 import { maxInputAmount, pruneDecimalInput } from "./amount";
 import { Status } from "@/components/ui/Status";
@@ -19,11 +35,10 @@ export const TRADE_MODES: readonly TradeMode[] = ["Buy", "Sell", "Deposit", "Red
 
 const SLIPPAGES = [0.005, 0.01, 0.03];
 
-/** Units of each constituent the demo wallet can deposit. */
-const DEMO_LEG_BALANCE = 1e6;
+/** BasketVault.MIN_MINT_SHARES */
+const MIN_MINT_SHARES = 0.001;
 
-/** Simulated confirmation time for demo transactions. */
-const DEMO_TX_MS = 900;
+const REFRESH_MS = 8_000;
 
 const compactQty = (n: number) => (n >= 1e5 ? compactNumber(n) : qty(n));
 
@@ -59,51 +74,100 @@ export function TradePanel({
   initialMode?: TradeMode;
 }) {
   const wallet = useWallet();
-  const { balanceOf, transact } = useDarwin();
-  const isConnected = wallet.isConnected && !!wallet.address;
+  const { refresh } = useDarwin();
+  const sendTx = useSendTx();
+  const client = usePublicClient({ chainId: chain.id });
+  const account = wallet.address;
+  const isConnected = wallet.isConnected && !!account;
+  const vault = b.address as `0x${string}`;
 
-  const isMon = b.quote === "MON";
-  const quoteSymbol = isMon ? "MON" : "USDC";
-  const quoteUsd = isMon ? MON_USD : 1;
+  const quoteSymbol = "USDC";
 
   const modes = useMemo(() => only ?? TRADE_MODES, [only]);
   const [mode, setMode] = useState<TradeMode>(() => (initialMode && modes.includes(initialMode) ? initialMode : (modes[0] ?? "Redeem")));
-  const [input, setInput] = useState("1");
+  const [input, setInput] = useState("100");
   const [slippage, setSlippage] = useState(0.01);
   const [working, setWorking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
 
   const amount = Number(input) || 0;
   const minting = mode === "Buy" || mode === "Deposit";
   const swapping = mode === "Buy" || mode === "Sell";
   const feeBps = minting ? b.mintFeeBps + b.protocolMintFeeBps : b.redeemFeeBps + b.protocolRedeemFeeBps;
+  const usdIn = mode === "Buy" ? parseAmount(input, USDC_DECIMALS) : 0n;
+  const sharesIn = mode === "Buy" ? 0n : parseAmount(input, 18);
 
-  // Local quote: pool price per share (cost vs NAV premium), fees, and size impact against 1% capacity.
-  const premium = b.navUsd > 0 && b.costPerShareUsd > 0 ? b.costPerShareUsd / b.navUsd : 1;
-  const impact = (usdSize: number) => (b.capacityUsd > 0 ? (0.01 * usdSize) / b.capacityUsd : 0);
-  const fairShares = mode === "Buy" && b.navUsd > 0 ? (amount * quoteUsd) / b.navUsd : 0;
-  const buyShares =
-    mode === "Buy" && b.navUsd > 0 && amount > 0
-      ? (amount * quoteUsd) / (b.navUsd * premium * (1 + feeBps / 1e4) * (1 + impact(amount * quoteUsd)))
-      : 0;
-  const sellQuote =
-    mode === "Sell" && amount > 0 && quoteUsd > 0
-      ? (amount * b.navUsd * (1 - feeBps / 1e4) * (1 - impact(amount * b.navUsd))) / premium / quoteUsd
-      : 0;
+  // Wallet state: USDC, basket shares, every constituent, and the allowances each flow needs.
+  const { data: walletReads } = useReadContracts({
+    allowFailure: false,
+    contracts: account
+      ? [
+          { address: DEPLOYMENT.usd, abi: erc20Abi, functionName: "balanceOf", args: [account] },
+          { address: DEPLOYMENT.usd, abi: erc20Abi, functionName: "allowance", args: [account, DEPLOYMENT.router] },
+          { address: vault, abi: erc20Abi, functionName: "balanceOf", args: [account] },
+          { address: vault, abi: erc20Abi, functionName: "allowance", args: [account, DEPLOYMENT.router] },
+          ...b.legs.map((l) => ({ address: l.address as `0x${string}`, abi: erc20Abi, functionName: "balanceOf" as const, args: [account] as const })),
+          ...b.legs.map((l) => ({
+            address: l.address as `0x${string}`,
+            abi: erc20Abi,
+            functionName: "allowance" as const,
+            args: [account, vault] as const,
+          })),
+        ]
+      : [],
+    query: { enabled: isConnected, refetchInterval: REFRESH_MS },
+  });
+  const reads = walletReads as bigint[] | undefined;
+  const usdcBalance = reads?.[0];
+  const usdcAllowance = reads?.[1] ?? 0n;
+  const shareBalanceRaw = reads?.[2];
+  const shareAllowance = reads?.[3] ?? 0n;
+  const legBalancesRaw = reads?.slice(4, 4 + b.legs.length);
+  const legAllowances = reads?.slice(4 + b.legs.length) ?? [];
+
+  // Exact quotes from the router and vault.
+  const { data: buyQuote } = useReadContract({
+    address: DEPLOYMENT.router,
+    abi: routerAbi,
+    functionName: "quoteBuy",
+    args: [vault, usdIn],
+    query: { enabled: mode === "Buy" && usdIn > 0n, refetchInterval: REFRESH_MS },
+  });
+  const { data: sellQuoteRaw } = useReadContract({
+    address: DEPLOYMENT.router,
+    abi: routerAbi,
+    functionName: "quoteSell",
+    args: [vault, sharesIn],
+    query: { enabled: mode === "Sell" && sharesIn > 0n, refetchInterval: REFRESH_MS },
+  });
+  const { data: mintAmounts } = useReadContract({
+    address: vault,
+    abi: vaultAbi,
+    functionName: "previewMint",
+    args: [sharesIn],
+    query: { enabled: mode === "Deposit" && sharesIn > 0n },
+  });
+  const { data: redeemAmounts } = useReadContract({
+    address: vault,
+    abi: vaultAbi,
+    functionName: "previewRedeem",
+    args: [sharesIn],
+    query: { enabled: mode === "Redeem" && sharesIn > 0n },
+  });
+
+  const fairShares = mode === "Buy" && b.navUsd > 0 ? amount / b.navUsd : 0;
+  const buyShares = mode === "Buy" && usdIn > 0n ? fromWad(buyQuote) : 0;
+  const sellQuote = mode === "Sell" && sharesIn > 0n ? fromUsdc(sellQuoteRaw) : 0;
   const hasQuote = mode === "Buy" ? buyShares > 0 : mode === "Sell" ? sellQuote > 0 : false;
   const buyPremium = mode === "Buy" && hasQuote && fairShares > 0 ? 1 - buyShares / fairShares : null;
   const sellDiscount =
-    mode === "Sell" && hasQuote && amount > 0 && b.navUsd > 0 ? 1 - (sellQuote * quoteUsd) / (amount * b.navUsd) : null;
+    mode === "Sell" && hasQuote && amount > 0 && b.navUsd > 0 ? 1 - sellQuote / (amount * b.navUsd) : null;
 
-  const shareBalance = isConnected ? balanceOf(wallet.address, b.address) : null;
-  const legBalances = useMemo(() => (isConnected ? b.legs.map(() => DEMO_LEG_BALANCE) : null), [isConnected, b.legs]);
+  const usdcFloat = isConnected && usdcBalance !== undefined ? fromUsdc(usdcBalance) : null;
+  const shareBalance = isConnected && shareBalanceRaw !== undefined ? fromWad(shareBalanceRaw) : null;
+  const legBalances = useMemo(() => (isConnected && legBalancesRaw ? legBalancesRaw.map(fromWad) : null), [isConnected, legBalancesRaw]);
   const shares = mode === "Buy" ? buyShares : amount;
   const hourlyCap = minting ? b.issuanceAvailable : b.redemptionAvailable;
 
@@ -116,42 +180,102 @@ export function TradePanel({
       : null;
   const depositMax = depositCover !== null && Number.isFinite(depositCover) ? Math.max(0, depositCover) : null;
   const mintable = depositMax === null ? null : Math.min(depositMax, hourlyCap ?? Infinity);
-  const available = mode === "Deposit" ? mintable : mode === "Sell" || mode === "Redeem" ? shareBalance : null;
+  const available =
+    mode === "Buy" ? usdcFloat : mode === "Deposit" ? mintable : mode === "Sell" || mode === "Redeem" ? shareBalance : null;
 
   const overHourly = hourlyCap !== undefined && shares > hourlyCap + 1e-9;
   const paused = b.paused && minting;
-  const overCapacity = mode === "Buy" && b.capacityUsd > 0 && amount * quoteUsd > b.capacityUsd;
-  const overBalance = !minting && shareBalance !== null && amount > shareBalance;
-  const overWallet = mode === "Deposit" && depositMax !== null && amount > depositMax + 1e-9;
+  const overCapacity = mode === "Sell" && b.capacityUsd > 0 && sellQuote > b.capacityUsd;
+  const overBalance = !minting && shareBalance !== null && sharesIn > (shareBalanceRaw ?? 0n);
+  const overUsdc = mode === "Buy" && usdcBalance !== undefined && usdIn > usdcBalance;
+  const overWallet =
+    mode === "Deposit" &&
+    !!mintAmounts &&
+    !!legBalancesRaw &&
+    mintAmounts.some((need, i) => need > (legBalancesRaw[i] ?? 0n));
+  const belowMinimum = minting && shares > 0 && shares < MIN_MINT_SHARES;
 
   const blocker = isConnected
     ? paused
       ? "Issuance is paused"
-      : overHourly
-        ? `Only ${qty(hourlyCap)} shares can ${minting ? "be minted" : "exit"} this hour`
-        : overCapacity
-          ? `Above the ${usd(b.capacityUsd)} 1% capacity`
-          : overWallet
-            ? `Wallet assets cover up to ${qty(depositMax ?? 0)} shares`
-            : overBalance
-              ? `Above your ${qty(shareBalance ?? 0)} share balance`
-              : amount <= 0
-                ? "Enter an amount"
-                : null
-    : "Connect wallet";
+      : amount <= 0
+        ? "Enter an amount"
+        : overUsdc
+          ? "Insufficient USDC"
+          : overHourly
+            ? `Only ${qty(hourlyCap)} shares can ${minting ? "be minted" : "exit"} this hour`
+            : overCapacity
+              ? `Above the ${usd(b.capacityUsd)} market reserve`
+              : overWallet
+                ? depositMax
+                  ? `Wallet assets cover up to ${qty(depositMax)} shares`
+                  : `You don't hold the ${b.symbol} constituents`
+                : overBalance
+                  ? `Above your ${qty(shareBalance ?? 0)} share balance`
+                  : belowMinimum
+                    ? `Minimum ${MIN_MINT_SHARES} shares`
+                    : mode === "Buy" && !hasQuote
+                      ? "Fetching quote…"
+                      : null
+    : wallet.hasWallet
+      ? "Connect wallet"
+      : "Install a wallet";
 
-  function confirm() {
-    if (!isConnected || !wallet.address || amount <= 0 || blocker) return;
-    const account = wallet.address;
+  async function confirm() {
+    if (!isConnected || !account || !client || blocker) return;
     setWorking(true);
-    setStatus(PROGRESS[mode]);
-    timer.current = setTimeout(() => {
-      transact(account, b.address, minting ? shares : -amount);
-      setStatus(`${PAST_TENSE[mode]} recorded.`);
-      setWorking(false);
+    try {
+      let hash: string;
+      if (mode === "Buy") {
+        if (usdcAllowance < usdIn) {
+          setStatus("Approving USDC…");
+          await sendTx({ address: DEPLOYMENT.usd, abi: erc20Abi, functionName: "approve", args: [DEPLOYMENT.router, maxUint256] });
+        }
+        setStatus(PROGRESS.Buy);
+        const quoted = await client.readContract({ address: DEPLOYMENT.router, abi: routerAbi, functionName: "quoteBuy", args: [vault, usdIn] });
+        ({ hash } = await sendTx({
+          address: DEPLOYMENT.router,
+          abi: routerAbi,
+          functionName: "buy",
+          args: [vault, usdIn, withSlippage(quoted, slippage), account, deadline()],
+        }));
+      } else if (mode === "Sell") {
+        if (shareAllowance < sharesIn) {
+          setStatus(`Approving ${b.symbol}…`);
+          await sendTx({ address: vault, abi: erc20Abi, functionName: "approve", args: [DEPLOYMENT.router, maxUint256] });
+        }
+        setStatus(PROGRESS.Sell);
+        const quoted = await client.readContract({ address: DEPLOYMENT.router, abi: routerAbi, functionName: "quoteSell", args: [vault, sharesIn] });
+        ({ hash } = await sendTx({
+          address: DEPLOYMENT.router,
+          abi: routerAbi,
+          functionName: "sell",
+          args: [vault, sharesIn, withSlippage(quoted, slippage), account, deadline()],
+        }));
+      } else if (mode === "Deposit") {
+        const need = await client.readContract({ address: vault, abi: vaultAbi, functionName: "previewMint", args: [sharesIn] });
+        const approvals = b.legs.filter((_, i) => (legAllowances[i] ?? 0n) < need[i]);
+        for (const [n, leg] of approvals.entries()) {
+          setStatus(`Approving ${leg.symbol} (${n + 1}/${approvals.length})…`);
+          await sendTx({ address: leg.address as `0x${string}`, abi: erc20Abi, functionName: "approve", args: [vault, maxUint256] });
+        }
+        setStatus(PROGRESS.Deposit);
+        ({ hash } = await sendTx({ address: vault, abi: vaultAbi, functionName: "mint", args: [sharesIn, account, need, deadline()] }));
+      } else {
+        setStatus(PROGRESS.Redeem);
+        const out = await client.readContract({ address: vault, abi: vaultAbi, functionName: "previewRedeem", args: [sharesIn] });
+        ({ hash } = await sendTx({ address: vault, abi: vaultAbi, functionName: "redeem", args: [sharesIn, account, out, deadline()] }));
+      }
+      setStatus(`${PAST_TENSE[mode]} confirmed. ${txUrl(hash)}`);
+      setInput("");
       setReviewing(false);
+      await refresh();
       onDone?.();
-    }, DEMO_TX_MS);
+    } catch (e) {
+      setStatus(errorMessage(e));
+    } finally {
+      setWorking(false);
+    }
   }
 
   const payLabel = mode === "Buy" ? "You pay" : "Shares to sell";
@@ -192,7 +316,7 @@ export function TradePanel({
           {mode === "Buy" ? quoteSymbol : b.symbol}
         </span>
       </div>
-      <div className="well-note num">{mode === "Buy" ? `≈ ${usd(amount * quoteUsd)}` : `Current value ${usd(amount * b.navUsd)}`}</div>
+      <div className="well-note num">{mode === "Buy" ? `≈ ${usd(amount)}` : `Current value ${usd(amount * b.navUsd)}`}</div>
     </>
   );
 
@@ -238,10 +362,15 @@ export function TradePanel({
             address: leg.address,
             symbol: leg.symbol,
             weight: leg.weight,
-            amount: amount * leg.perShare * (minting ? 1 + feeBps / 1e4 : 1 - feeBps / 1e4),
+            amount:
+              mode === "Deposit" && mintAmounts
+                ? fromWad(mintAmounts[i])
+                : mode === "Redeem" && redeemAmounts
+                  ? fromWad(redeemAmounts[i])
+                  : amount * leg.perShare * (minting ? 1 + feeBps / 1e4 : 1 - feeBps / 1e4),
             available: legBalances ? (legBalances[i] ?? 0) : null,
           })),
-    [amount, b.legs, feeBps, legBalances, minting, swapping],
+    [amount, b.legs, feeBps, legBalances, minting, swapping, mode, mintAmounts, redeemAmounts],
   );
   const shownAssets = inKindAssets.slice(0, embedded ? 4 : 6);
   const hiddenAssets = inKindAssets.length - shownAssets.length;
@@ -517,6 +646,11 @@ export function TradePanel({
           </button>
         )}
         <Status text={status} />
+        {isConnected && mode === "Buy" && usdcFloat !== null && (usdcFloat < 100 || overUsdc) && (
+          <div className={styles.faucetRow}>
+            <FaucetButton />
+          </div>
+        )}
       </div>
       {!compact && (
         <div className="card kv-card">
