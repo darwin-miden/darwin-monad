@@ -10,7 +10,7 @@ import { FaucetButton } from "@/components/wallet/FaucetButton";
 import { assetColor } from "@/lib/assetColor";
 import {
   DEPLOYMENT,
-  deadline,
+  chainDeadline,
   erc20Abi,
   fromUsdc,
   fromWad,
@@ -204,14 +204,14 @@ export function TradePanel({
           ? "Insufficient USDC"
           : overHourly
             ? `Only ${qty(hourlyCap)} shares can ${minting ? "be minted" : "exit"} this hour`
-            : overCapacity
-              ? `Above the ${usd(b.capacityUsd)} market reserve`
+            : overBalance
+              ? `Above your ${qty(shareBalance ?? 0)} share balance`
               : overWallet
                 ? depositMax
                   ? `Wallet assets cover up to ${qty(depositMax)} shares`
                   : `You don't hold the ${b.symbol} constituents`
-                : overBalance
-                  ? `Above your ${qty(shareBalance ?? 0)} share balance`
+                : overCapacity
+                  ? `Above the ${usd(b.capacityUsd)} market reserve`
                   : belowMinimum
                     ? `Minimum ${MIN_MINT_SHARES} shares`
                     : mode === "Buy" && !hasQuote
@@ -237,7 +237,7 @@ export function TradePanel({
           address: DEPLOYMENT.router,
           abi: routerAbi,
           functionName: "buy",
-          args: [vault, usdIn, withSlippage(quoted, slippage), account, deadline()],
+          args: [vault, usdIn, withSlippage(quoted, slippage), account, await chainDeadline(client)],
         }));
       } else if (mode === "Sell") {
         if (shareAllowance < sharesIn) {
@@ -250,7 +250,7 @@ export function TradePanel({
           address: DEPLOYMENT.router,
           abi: routerAbi,
           functionName: "sell",
-          args: [vault, sharesIn, withSlippage(quoted, slippage), account, deadline()],
+          args: [vault, sharesIn, withSlippage(quoted, slippage), account, await chainDeadline(client)],
         }));
       } else if (mode === "Deposit") {
         const need = await client.readContract({ address: vault, abi: vaultAbi, functionName: "previewMint", args: [sharesIn] });
@@ -260,11 +260,11 @@ export function TradePanel({
           await sendTx({ address: leg.address as `0x${string}`, abi: erc20Abi, functionName: "approve", args: [vault, maxUint256] });
         }
         setStatus(PROGRESS.Deposit);
-        ({ hash } = await sendTx({ address: vault, abi: vaultAbi, functionName: "mint", args: [sharesIn, account, need, deadline()] }));
+        ({ hash } = await sendTx({ address: vault, abi: vaultAbi, functionName: "mint", args: [sharesIn, account, need, await chainDeadline(client)] }));
       } else {
         setStatus(PROGRESS.Redeem);
         const out = await client.readContract({ address: vault, abi: vaultAbi, functionName: "previewRedeem", args: [sharesIn] });
-        ({ hash } = await sendTx({ address: vault, abi: vaultAbi, functionName: "redeem", args: [sharesIn, account, out, deadline()] }));
+        ({ hash } = await sendTx({ address: vault, abi: vaultAbi, functionName: "redeem", args: [sharesIn, account, out, await chainDeadline(client)] }));
       }
       setStatus(`${PAST_TENSE[mode]} confirmed. ${txUrl(hash)}`);
       setInput("");

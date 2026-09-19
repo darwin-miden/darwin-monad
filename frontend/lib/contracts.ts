@@ -68,7 +68,15 @@ export const testUsdAbi = parseAbi([
   "function FAUCET_COOLDOWN() view returns (uint256)",
 ]);
 
-export const deadline = (minutes = 20) => BigInt(Math.floor(Date.now() / 1000) + minutes * 60);
+/**
+ * Trade deadline anchored on the chain's clock, not the browser's: a wallet whose clock runs
+ * behind would otherwise send already-expired trades.
+ */
+export async function chainDeadline(client: { getBlock: () => Promise<{ timestamp: bigint }> }, minutes = 20) {
+  const { timestamp } = await client.getBlock();
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  return (timestamp > now ? timestamp : now) + BigInt(minutes * 60);
+}
 
 export const toWad = (n: number) => BigInt(Math.round(n * 1e9)) * 10n ** 9n;
 export const fromWad = (n: bigint | undefined) => (n === undefined ? 0 : Number(n) / 1e18);
