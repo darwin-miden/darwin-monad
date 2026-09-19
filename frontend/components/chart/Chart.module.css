@@ -1,0 +1,152 @@
+.frame {
+  grid-template-rows: var(--chart-height);
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  container-type: inline-size;
+}
+.frame[data-axis] {
+  grid-template-rows: var(--chart-height) 25px;
+}
+.fill,
+.fill[data-axis] {
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+.fill[data-axis] {
+  grid-template-rows: minmax(0, 1fr) 25px;
+}
+.plot,
+.svg,
+.skeleton,
+.empty {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+.plot {
+  position: relative;
+  overflow: hidden;
+}
+.svg,
+.skeleton {
+  display: block;
+}
+.interactive {
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+.inspector {
+  z-index: 2;
+  pointer-events: none;
+  animation: inspector-in var(--dur-fast) var(--ease-out);
+  position: absolute;
+  inset: 0;
+}
+@keyframes inspector-in {
+  0% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.toolline {
+  top: 0;
+  bottom: 0;
+  left: var(--chart-hover-x);
+  background: var(--color-border-hover);
+  width: 1px;
+  position: absolute;
+  transform: translate(-0.5px);
+}
+.point {
+  top: var(--chart-hover-y);
+  left: var(--chart-hover-x);
+  border: 2px solid var(--pane);
+  border-radius: var(--radius-round);
+  background: var(--chart-hover-color);
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 1px var(--chart-hover-color);
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+.readout {
+  border-radius: var(--radius-m);
+  background: var(--ink);
+  min-width: 112px;
+  max-width: calc(100vw - 16px);
+  color: var(--on-ink);
+  box-shadow: var(--shadow-card);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  border: 0;
+  margin: 0;
+  padding: 7px 10px;
+  position: fixed;
+  inset: auto;
+}
+.readout::backdrop {
+  pointer-events: none;
+}
+.readout > span,
+.readout > strong {
+  line-height: 1.25;
+  display: block;
+}
+.readout > span {
+  color: var(--on-ink-faint);
+  font-size: 10.5px;
+}
+.readout > strong {
+  font-variant-numeric: tabular-nums lining-nums;
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.empty {
+  border-radius: var(--radius-m);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  text-align: center;
+  place-items: center;
+  padding: 16px;
+  font-size: 12px;
+  display: grid;
+}
+.grid {
+  stroke: var(--color-border-hair);
+}
+.axis {
+  height: 25px;
+  color: var(--color-text-faint);
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  font-size: 11px;
+  line-height: 17px;
+  display: flex;
+}
+.axis span {
+  white-space: nowrap;
+  min-width: 0;
+}
+@container (max-width:460px) {
+  .frame:not(.fill) .plot {
+    height: min(var(--chart-height), 220px);
+  }
+  .frame:not(.fill) {
+    grid-template-rows: auto;
+  }
+  .frame:not(.fill)[data-axis] {
+    grid-template-rows: auto 25px;
+  }
+}
+@container (max-width:340px) {
+  .frame:not(.fill) .plot {
+    height: min(var(--chart-height), 190px);
+  }
+}

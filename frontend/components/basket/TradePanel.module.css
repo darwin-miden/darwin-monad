@@ -1,0 +1,465 @@
+.embedded {
+  --capacity-slot-height: 34px;
+  isolation: isolate;
+  min-width: 0;
+  position: relative;
+}
+.modeNav {
+  height: 40px;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-med) var(--ease-out),
+    visibility 0s linear var(--dur-fast);
+}
+.modeNav :global(.seg) > button[data-tone="buy"][data-on] {
+  background: var(--color-action-buy);
+  color: var(--color-text-on-action);
+  box-shadow: none;
+}
+.modeNav :global(.seg) > button[data-tone="sell"][data-on] {
+  background: var(--color-action-sell);
+  color: var(--color-text-on-action);
+  box-shadow: none;
+}
+.modeNav :global(.seg) > button[data-tone="deposit"][data-on] {
+  background: var(--color-action-deposit);
+  color: var(--color-text-on-action);
+  box-shadow: none;
+}
+.modeNav :global(.seg) > button[data-tone="redeem"][data-on] {
+  background: var(--color-action-redeem);
+  color: var(--color-text-on-action);
+  box-shadow: none;
+}
+.modeNav :global(.seg) > button[data-on] {
+  animation: trade-mode-settle var(--dur-med) var(--ease-out);
+}
+.modeNav :global(.seg) > button:active:not(:disabled) {
+  filter: brightness(0.94);
+  transform: none;
+}
+@keyframes trade-mode-settle {
+  0% {
+    filter: brightness(0.94);
+  }
+  to {
+    filter: none;
+  }
+}
+.embedded[data-details-open] .modeNav {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.modeBody {
+  animation: mode-enter var(--dur-med) var(--ease-out);
+}
+.embedded .modeBody {
+  height: 249px;
+  overflow: hidden;
+}
+.embedded:is([data-trade-mode="deposit"], [data-trade-mode="redeem"])
+  .modeBody {
+  height: calc(249px + var(--capacity-slot-height));
+}
+.embedded:is([data-trade-mode="deposit"], [data-trade-mode="redeem"])
+  .capacitySlot {
+  display: none;
+}
+@keyframes mode-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.inKindPanel {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-l);
+  background: var(--color-bg-subtle);
+  margin-top: 16px;
+  overflow: hidden;
+}
+.inKindPanel[data-tone="deposit"] {
+  border-color: var(--color-action-deposit);
+}
+.inKindPanel[data-tone="redeem"] {
+  border-color: var(--color-action-redeem);
+}
+.shareInputSection {
+  padding: 15px 16px 16px;
+}
+.shareInputHead {
+  color: var(--color-text-muted);
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  display: flex;
+}
+.available {
+  white-space: nowrap;
+  align-items: center;
+  gap: 5px;
+  display: flex;
+}
+.available b {
+  color: var(--color-text-primary);
+  font-weight: 650;
+}
+.useMax {
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-xs);
+  color: var(--color-text-primary);
+  margin-left: 4px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 650;
+}
+.useMax:hover:not(:disabled) {
+  border-color: var(--color-border-hover);
+  background: var(--pane);
+}
+.useMax:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.shareInputRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 14px;
+  margin-top: 8px;
+  display: grid;
+}
+.shareInput {
+  width: 100%;
+  min-width: 0;
+  color: var(--color-text-primary);
+  letter-spacing: -0.035em;
+  font-size: 32px;
+  font-weight: 620;
+  line-height: 1.1;
+}
+.shareSymbol {
+  border-left: 1px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+  padding-left: 13px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.currentValue {
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+.assetSection {
+  border-top: 1px solid var(--color-border-default);
+  background: var(--pane);
+  padding: 14px 16px 12px;
+}
+.assetSectionHead {
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  display: flex;
+}
+.assetSectionHead strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.assetSectionHead > span {
+  color: var(--color-text-muted);
+  text-align: right;
+  font-size: 10.5px;
+}
+.assetWeightBar {
+  background: var(--color-bg-track);
+  border-radius: 2px;
+  gap: 1px;
+  width: 100%;
+  height: 4px;
+  margin-top: 11px;
+  display: flex;
+  overflow: hidden;
+}
+.assetWeightBar i {
+  min-width: 2px;
+  display: block;
+}
+.assetRows {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+  margin-top: 6px;
+  display: grid;
+}
+.assetRow {
+  border-bottom: 1px solid var(--color-border-soft);
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  font-size: 11.5px;
+  display: grid;
+}
+.assetRow > span {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  overflow: hidden;
+}
+.assetRow > b {
+  text-align: right;
+  font-weight: 650;
+}
+.assetRow[data-short] > b {
+  color: var(--color-status-negative);
+}
+.moreAssets {
+  color: var(--color-text-secondary);
+  margin: 10px auto 0;
+  font-size: 11px;
+  font-weight: 650;
+  display: block;
+}
+.moreAssets:hover {
+  color: var(--color-text-primary);
+}
+.embedded .inKindPanel {
+  grid-template-rows: auto minmax(0, 1fr);
+  height: calc(100% - 16px);
+  display: grid;
+}
+.embedded .shareInputSection {
+  padding: 9px 12px 8px;
+}
+.embedded .shareInputRow {
+  margin-top: 3px;
+}
+.embedded .shareInput {
+  font-size: 30px;
+}
+.embedded .currentValue {
+  margin-top: 1px;
+}
+.embedded .assetSection {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 0;
+  padding: 8px 12px 7px;
+  display: grid;
+}
+.embedded .assetWeightBar {
+  height: 3px;
+  margin-top: 5px;
+}
+.embedded .assetRows {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 10px;
+  min-height: 0;
+  margin-top: 3px;
+}
+.embedded .assetRow {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 6px;
+  min-height: 30px;
+  font-size: 11px;
+}
+.embedded .moreAssets {
+  margin-top: 4px;
+}
+.modeAction {
+  color: var(--color-text-on-action);
+}
+.modeAction[data-tone="buy"] {
+  background: var(--color-action-buy);
+}
+.modeAction[data-tone="sell"] {
+  background: var(--color-action-sell);
+}
+.modeAction[data-tone="deposit"] {
+  background: var(--color-action-deposit);
+}
+.modeAction[data-tone="redeem"] {
+  background: var(--color-action-redeem);
+}
+.modeAction:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.detailsSlot {
+  height: 58px;
+  padding-top: 14px;
+}
+.capacitySlot {
+  height: var(--capacity-slot-height, 34px);
+  padding-top: 12px;
+}
+.details {
+  border-top: 1px solid var(--color-border-hair);
+  margin-top: 0;
+}
+.embedded .details[open] {
+  z-index: 3;
+  overscroll-behavior-y: auto;
+  touch-action: pan-y;
+  background: var(--pane);
+  scrollbar-gutter: stable;
+  border-top: 0;
+  padding-bottom: 12px;
+  position: absolute;
+  inset: 0 0 64px;
+  overflow-y: auto;
+}
+.details > summary {
+  min-height: 44px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+}
+.details > summary::-webkit-details-marker {
+  display: none;
+}
+.details > summary:after {
+  content: "+";
+  color: var(--color-text-muted);
+  font-size: 16px;
+}
+.details[open] > summary:after {
+  content: "−";
+}
+.embedded .details[open] > summary {
+  z-index: 1;
+  border-bottom: 1px solid var(--color-border-hair);
+  background: var(--pane);
+  position: sticky;
+  top: 0;
+}
+.review {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-l);
+  background: var(--color-bg-subtle);
+  animation: mode-enter var(--dur-med) var(--ease-out);
+  margin-top: 14px;
+  padding: 14px;
+}
+.reviewTitle {
+  font-size: 13px;
+  font-weight: 700;
+}
+.reviewRows {
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  display: grid;
+}
+.reviewRows > div {
+  justify-content: space-between;
+  gap: 16px;
+  display: flex;
+}
+.reviewRows > div > span {
+  color: var(--color-text-muted);
+}
+.reviewRows b {
+  text-align: right;
+  font-weight: 650;
+}
+.reviewRows a {
+  color: var(--color-status-positive);
+  font-weight: 650;
+}
+.reviewAssetRow {
+  align-items: flex-start;
+}
+.reviewAssetRow > b {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 10px;
+  display: flex;
+}
+.reviewAssetRow i {
+  white-space: nowrap;
+  gap: 4px;
+  font-style: normal;
+  display: inline-flex;
+}
+.reviewAssetRow i > span:first-child {
+  color: var(--color-text-muted);
+}
+.reviewWarning {
+  color: var(--color-status-warning);
+  margin-top: 10px;
+  font-size: 11.5px;
+}
+.reviewActions {
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 12px;
+  display: grid;
+}
+@media (max-width: 520px) {
+  .shareInputHead {
+    align-items: flex-start;
+  }
+  .available {
+    grid-template-columns: auto auto;
+    justify-items: end;
+    display: grid;
+  }
+  .available .useMax {
+    grid-column: 1/-1;
+    margin-left: 0;
+  }
+  .assetRows {
+    grid-template-columns: 1fr;
+  }
+  .embedded .shareInputHead {
+    align-items: center;
+  }
+  .embedded .available {
+    justify-items: initial;
+    display: flex;
+  }
+  .embedded .available .useMax {
+    grid-column: auto;
+    margin-left: 4px;
+  }
+  .embedded .assetRows {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 360px) {
+  .embedded :global(.well) {
+    padding: 12px;
+  }
+  .embedded :global(.well-head) {
+    gap: 6px;
+    font-size: 10.5px;
+  }
+  .embedded :global(.well-head) > span {
+    white-space: nowrap;
+    gap: 3px;
+  }
+  .embedded :global(.well-body) {
+    margin-top: 6px;
+  }
+  .embedded :global(.well-note) {
+    white-space: nowrap;
+    margin-top: 5px;
+    font-size: 10.5px;
+  }
+}
+
+.faucetRow {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
