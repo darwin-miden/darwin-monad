@@ -1,0 +1,146 @@
+.root {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-l);
+  background: var(--color-border-hair);
+  width: 100%;
+  min-height: 220px;
+  position: relative;
+  overflow: hidden;
+}
+.tile {
+  text-align: left;
+  background: 0 0;
+  border: 0;
+  min-width: 0;
+  padding: 0;
+  position: absolute;
+  overflow: hidden;
+  container-type: size;
+}
+button.tile {
+  cursor: pointer;
+}
+button.tile[data-selected] .tileInner {
+  box-shadow: inset 0 0 0 3px var(--tile-ink, var(--color-text-primary));
+}
+button.tile:focus-visible {
+  z-index: 1;
+  outline: 3px solid var(--color-focus);
+  outline-offset: -3px;
+}
+.tileInner {
+  width: 100%;
+  height: 100%;
+  padding: var(--treemap-padding, clamp(10px, 1.4vw, 18px));
+  color: var(--tile-ink, var(--color-text-primary));
+  background: var(--tile-color);
+  transition:
+    filter var(--dur-fast) var(--ease-out),
+    transform var(--dur-med) var(--ease-out);
+  border-radius: 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px #19191812;
+}
+button.tile:hover .tileInner {
+  filter: brightness(0.97);
+  transform: scale(0.985);
+}
+button.tile:active .tileInner {
+  transform: scale(0.97);
+}
+.logo {
+  top: var(--treemap-logo-offset, clamp(10px, 1.3vw, 16px));
+  left: var(--treemap-logo-offset, clamp(10px, 1.3vw, 16px));
+  display: none;
+  position: absolute;
+}
+.symbol {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-size: clamp(8px, min(16cqw, 16cqh), 16px);
+  font-weight: 700;
+  line-height: 1.1;
+  display: none;
+  overflow: hidden;
+}
+.value {
+  opacity: 0.88;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-size: clamp(8px, min(14cqw, 14cqh), 14px);
+  font-weight: 650;
+  line-height: 1;
+  display: none;
+  overflow: hidden;
+}
+.compact {
+  min-height: 88px;
+}
+.compact .tileInner {
+  justify-content: flex-end;
+  padding: 7px 8px;
+}
+.compact .logo {
+  top: 6px;
+  left: 7px;
+}
+.compact .symbol {
+  font-size: clamp(8px, min(15cqw, 18cqh), 11px);
+}
+.compact .value {
+  font-size: clamp(8px, min(14cqw, 16cqh), 10px);
+}
+@container (max-width:72px) {
+  .tileInner,
+  .compact .tileInner {
+    padding: 4px;
+  }
+}
+@container (max-height:72px) {
+  .tileInner,
+  .compact .tileInner {
+    padding: 4px;
+  }
+}
+@container (max-width:36px) {
+  .tileInner,
+  .compact .tileInner {
+    padding: 0;
+  }
+}
+@container (max-height:23px) {
+  .tileInner,
+  .compact .tileInner {
+    padding: 0;
+  }
+}
+@container (min-width:37px) and (min-height:24px) {
+  .symbol {
+    display: block;
+  }
+}
+@container (min-width:43px) and (min-height:40px) {
+  .value {
+    display: block;
+  }
+}
+@container (min-width:49px) and (min-height:60px) {
+  .logo {
+    display: block;
+  }
+}
+@media (max-width: 620px) {
+  .root {
+    min-height: 280px;
+  }
+  .compact {
+    min-height: 96px;
+  }
+}
