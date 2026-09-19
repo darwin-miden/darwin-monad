@@ -6,6 +6,7 @@ import {
   faucetReady,
   getBasket,
   holdings,
+  nativeBalance,
   publicClient,
   quoteBuy,
   quoteSell,
@@ -18,21 +19,32 @@ import {
 import { IS_FORK } from "./env";
 import { expect, test } from "./wallet";
 
+/** Basket traded by the suite: 7 legs on the fork, 3 legs live to keep testnet gas low. */
+const SYMBOL = process.env.E2E_BASKET ?? (IS_FORK ? "MAG7" : "CRYPTO");
+
+/** Live runs skip a test when the wallet can't cover its gas (Monad bills the full gas limit). */
+async function requireMon(address: Address, mon: number) {
+  if (IS_FORK) return;
+  const balance = Number(await nativeBalance(address)) / 1e18;
+  test.skip(balance < mon, `needs ~${mon} MON for gas, wallet has ${balance.toFixed(3)}`);
+}
+
 const USDC = (n: number) => BigInt(Math.round(n * 1e6));
 const WAD = (n: number) => BigInt(Math.round(n * 1e6)) * BigInt(1e12);
 
 test.describe.configure({ mode: "serial" });
 
 test.describe("trade on-chain through the UI", () => {
-  let mag7: Address;
+  let basket: Address;
   let created: Address | undefined;
   const ticker = `E2E${Date.now().toString(36).slice(-5).toUpperCase()}`;
 
   test.beforeAll(async () => {
-    mag7 = (await allBaskets()).find((b) => b.symbol === "MAG7")!.vault;
+    basket = (await allBaskets()).find((b) => b.symbol === SYMBOL)!.vault;
   });
 
   test("connects and claims test USDC from the wallet menu", async ({ page, wallet }) => {
+    await requireMon(wallet.address, 0.02);
     if (IS_FORK) await skipFaucetCooldown(wallet.address);
     test.skip(!(await faucetReady(wallet.address)), "faucet cooling down for this wallet");
     const before = await usdcBalance(wallet.address);
@@ -46,15 +58,16 @@ test.describe("trade on-chain through the UI", () => {
     expect((await usdcBalance(wallet.address)) - before).toBe(USDC(10_000));
   });
 
-  test("buys MAG7 with USDC: approve + router.buy, shares match the quote", async ({ page, wallet }) => {
+  test("buys the basket with USDC: approve + router.buy, shares match the quote", async ({ page, wallet }) => {
+    await requireMon(wallet.address, 0.15);
     const usdBefore = await usdcBalance(wallet.address);
-    const sharesBefore = await shareBalance(mag7, wallet.address);
-    const quoted = await quoteBuy(mag7, USDC(1_000));
-    await openBasket(page, mag7);
+    const sharesBefore = await shareBalance(basket, wallet.address);
+    const quoted = await quoteBuy(basket, USDC(1_000));
+    await openBasket(page, basket);
     await connect(page);
-    await trade(page, "Buy", "MAG7", "1000");
+    await trade(page, "Buy", SYMBOL, "1000");
     await wallet.settle();
-    const received = (await shareBalance(mag7, wallet.address)) - sharesBefore;
+    const received = (await shareBalance(basket, wallet.address)) - sharesBefore;
     const spent = usdBefore - (await usdcBalance(wallet.address));
     expect(pctDiff(received, quoted)).toBeLessThan(0.001);
     expect(spent).toBeLessThanOrEqual(USDC(1_000));
@@ -65,27 +78,29 @@ test.describe("trade on-chain through the UI", () => {
     expect(Number(received) / 1e18).toBeGreaterThan(9.9);
   });
 
-  test("sells 2 MAG7 shares back to USDC: approve + router.sell at the quoted price", async ({ page, wallet }) => {
+  test("sells 2 shares back to USDC: approve + router.sell at the quoted price", async ({ page, wallet }) => {
+    await requireMon(wallet.address, 0.15);
     const usdBefore = await usdcBalance(wallet.address);
-    const sharesBefore = await shareBalance(mag7, wallet.address);
-    const quoted = await quoteSell(mag7, WAD(2));
-    await openBasket(page, mag7);
+    const sharesBefore = await shareBalance(basket, wallet.address);
+    const quoted = await quoteSell(basket, WAD(2));
+    await openBasket(page, basket);
     await connect(page);
-    await trade(page, "Sell", "MAG7", "2");
+    await trade(page, "Sell", SYMBOL, "2");
     await wallet.settle();
-    expect(sharesBefore - (await shareBalance(mag7, wallet.address))).toBe(WAD(2));
+    expect(sharesBefore - (await shareBalance(basket, wallet.address))).toBe(WAD(2));
     expect(pctDiff((await usdcBalance(wallet.address)) - usdBefore, quoted)).toBeLessThan(0.001);
     expect(wallet.records.at(-1)!.label).toBe("sell");
   });
 
   test("redeems 1 share in kind: every constituent lands in the wallet", async ({ page, wallet }) => {
-    const expected = await publicClient.readContract({ address: mag7, abi: vaultAbi, functionName: "previewRedeem", args: [WAD(1)] });
-    const before = await stockBalances(mag7, wallet.address);
-    await openBasket(page, mag7);
+    await requireMon(wallet.address, 0.06);
+    const expected = await publicClient.readContract({ address: basket, abi: vaultAbi, functionName: "previewRedeem", args: [WAD(1)] });
+    const before = await stockBalances(basket, wallet.address);
+    await openBasket(page, basket);
     await connect(page);
-    await trade(page, "Redeem", "MAG7", "1");
+    await trade(page, "Redeem", SYMBOL, "1");
     await wallet.settle();
-    const after = await stockBalances(mag7, wallet.address);
+    const after = await stockBalances(basket, wallet.address);
     Object.keys(before).forEach((token, i) => {
       expect(after[token as Address] - before[token as Address]).toBe(expected[i]);
     });
@@ -93,15 +108,16 @@ test.describe("trade on-chain through the UI", () => {
   });
 
   test("deposits 0.5 share in kind: approves each constituent then vault.mint", async ({ page, wallet }) => {
-    const need = await publicClient.readContract({ address: mag7, abi: vaultAbi, functionName: "previewMint", args: [WAD(0.5)] });
-    const sharesBefore = await shareBalance(mag7, wallet.address);
-    const stocksBefore = await stockBalances(mag7, wallet.address);
-    await openBasket(page, mag7);
+    await requireMon(wallet.address, 0.1);
+    const need = await publicClient.readContract({ address: basket, abi: vaultAbi, functionName: "previewMint", args: [WAD(0.5)] });
+    const sharesBefore = await shareBalance(basket, wallet.address);
+    const stocksBefore = await stockBalances(basket, wallet.address);
+    await openBasket(page, basket);
     await connect(page);
-    await trade(page, "Deposit", "MAG7", "0.5");
+    await trade(page, "Deposit", SYMBOL, "0.5");
     await wallet.settle();
-    expect((await shareBalance(mag7, wallet.address)) - sharesBefore).toBe(WAD(0.5));
-    const stocksAfter = await stockBalances(mag7, wallet.address);
+    expect((await shareBalance(basket, wallet.address)) - sharesBefore).toBe(WAD(0.5));
+    const stocksAfter = await stockBalances(basket, wallet.address);
     Object.keys(stocksBefore).forEach((token, i) => {
       expect(stocksBefore[token as Address] - stocksAfter[token as Address]).toBe(need[i]);
     });
@@ -111,24 +127,24 @@ test.describe("trade on-chain through the UI", () => {
   test("guards: insufficient USDC, share balance and constituents block the trade", async ({ page, wallet }) => {
     const failuresBefore = wallet.failures.length;
     const sentBefore = wallet.records.length;
-    await openBasket(page, mag7);
+    await openBasket(page, basket);
     await connect(page);
-    await fillAmount(page, "Buy", "MAG7", "100000000");
+    await fillAmount(page, "Buy", SYMBOL, "100000000");
     await expect(cta(page)).toHaveText("Insufficient USDC");
     await expect(cta(page)).toBeDisabled();
 
     await setMode(page, "Sell");
-    await fillAmount(page, "Sell", "MAG7", "1000000");
+    await fillAmount(page, "Sell", SYMBOL, "1000000");
     await expect(cta(page)).toHaveText(/Above your .* share balance/);
     await expect(cta(page)).toBeDisabled();
 
     await setMode(page, "Deposit");
-    await fillAmount(page, "Deposit", "MAG7", "500");
+    await fillAmount(page, "Deposit", SYMBOL, "500");
     await expect(cta(page)).toHaveText(/Wallet assets cover up to|don't hold/);
     await expect(cta(page)).toBeDisabled();
 
     await setMode(page, "Buy");
-    await fillAmount(page, "Buy", "MAG7", "0");
+    await fillAmount(page, "Buy", SYMBOL, "0");
     await expect(cta(page)).toHaveText("Enter an amount");
     expect(wallet.failures.length).toBe(failuresBefore);
     expect(wallet.records.length).toBe(sentBefore);
@@ -136,10 +152,10 @@ test.describe("trade on-chain through the UI", () => {
 
   test("rejecting in the wallet shows an error and sends nothing", async ({ page, wallet }) => {
     const sent = wallet.records.length;
-    await openBasket(page, mag7);
+    await openBasket(page, basket);
     await connect(page);
     await setMode(page, "Buy");
-    await fillAmount(page, "Buy", "MAG7", "10");
+    await fillAmount(page, "Buy", SYMBOL, "10");
     await page.getByRole("button", { name: "Review buy" }).click();
     wallet.rejectNext();
     await page.getByRole("button", { name: "Confirm", exact: true }).click();
@@ -148,16 +164,18 @@ test.describe("trade on-chain through the UI", () => {
   });
 
   test("wrong network: the app switches to Monad Testnet before sending", async ({ page, wallet }) => {
-    const sharesBefore = await shareBalance(mag7, wallet.address);
-    await openBasket(page, mag7);
+    await requireMon(wallet.address, 0.15);
+    const sharesBefore = await shareBalance(basket, wallet.address);
+    await openBasket(page, basket);
     await connect(page);
     await wallet.setChainId(1);
-    await trade(page, "Buy", "MAG7", "20");
+    await trade(page, "Buy", SYMBOL, "20");
     await wallet.settle();
-    expect(await shareBalance(mag7, wallet.address)).toBeGreaterThan(sharesBefore);
+    expect(await shareBalance(basket, wallet.address)).toBeGreaterThan(sharesBefore);
   });
 
   test("creates a basket through BasketFactory and lands on its page", async ({ page, wallet }) => {
+    await requireMon(wallet.address, 0.22);
     const countBefore = await basketCount();
     await page.goto("/create");
     await connect(page);
@@ -189,6 +207,7 @@ test.describe("trade on-chain through the UI", () => {
   });
 
   test("buys the new basket", async ({ page, wallet }) => {
+    await requireMon(wallet.address, 0.15);
     test.skip(!created, "basket creation failed");
     const quoted = await quoteBuy(created!, USDC(250));
     await openBasket(page, created!);
@@ -200,7 +219,7 @@ test.describe("trade on-chain through the UI", () => {
 
   test("portfolio lists every position with its on-chain value", async ({ page, wallet }) => {
     const held = await holdings(wallet.address);
-    expect(held.length).toBeGreaterThanOrEqual(created ? 2 : 1);
+    expect(held.length).toBeGreaterThanOrEqual(1);
     await page.goto("/portfolio");
     await connect(page);
     for (const h of held) await expect(page.getByText(h.symbol, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
@@ -210,7 +229,8 @@ test.describe("trade on-chain through the UI", () => {
   });
 
   test("leaderboard shows the new creator", async ({ page, wallet }) => {
-    test.skip(!created, "basket creation failed");
+    const mine = (await allBaskets()).some((b) => b.owner.toLowerCase() === wallet.address.toLowerCase());
+    test.skip(!mine, "this wallet hasn't created a basket");
     await page.goto("/leaderboard");
     const a = wallet.address.toLowerCase();
     await expect(page.getByText(new RegExp(`${a.slice(0, 6)}(…|\\.\\.\\.)${a.slice(-4)}`, "i")).first()).toBeVisible({
