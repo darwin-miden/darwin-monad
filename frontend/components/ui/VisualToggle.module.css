@@ -1,0 +1,18 @@
+.root :global(.seg) {
+  width: 84px;
+}
+.root :global(.seg) > button {
+  width: 40px;
+  padding-inline: 0;
+}
+.icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  width: 17px;
+  height: 17px;
+  margin: auto;
+  display: block;
+}
