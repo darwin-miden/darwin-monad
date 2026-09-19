@@ -43,17 +43,34 @@ def yahoo_price(symbol: str) -> Decimal:
     return Decimal(str(meta["regularMarketPrice"]))
 
 
+def onchain_price(oracle: str, token: str, rpc: str) -> int:
+    out = subprocess.run(
+        ["cast", "call", oracle, "getPrice(address)(uint256)", token, "--rpc-url", rpc],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return int(out.split()[0])
+
+
 def push(deployment: dict, env: dict) -> None:
     symbols = deployment["symbols"]
     stocks = deployment["stocks"]
     with ThreadPoolExecutor(max_workers=8) as pool:
         prices = list(pool.map(yahoo_price, symbols))
-    raw = [str(int(p * Decimal(10) ** 18)) for p in prices]
+        current = list(pool.map(lambda t: onchain_price(deployment["oracle"], t, env["RPC_URL"]), stocks))
+    raw = [int(p * Decimal(10) ** 18) for p in prices]
+
+    # Only publish prices that moved: gas is billed on the full limit, and markets are closed on weekends.
+    changed = [i for i in range(len(stocks)) if raw[i] != current[i]]
+    if not changed:
+        print(f"[{time.strftime('%H:%M:%S')}] no price change", flush=True)
+        return
+    symbols = [symbols[i] for i in changed]
+    prices = [prices[i] for i in changed]
     cmd = [
         "cast", "send", deployment["oracle"],
         "setPrices(address[],uint256[])",
-        "[" + ",".join(stocks) + "]",
-        "[" + ",".join(raw) + "]",
+        "[" + ",".join(stocks[i] for i in changed) + "]",
+        "[" + ",".join(str(raw[i]) for i in changed) + "]",
         "--rpc-url", env["RPC_URL"],
         "--private-key", env["PRIVATE_KEY"],
         "--json",
